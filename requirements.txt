@@ -1,0 +1,7 @@
+streamlit
+supabase
+pandas
+plotly
+google-generativeai
+Pillow
+fpdf

@@ -37,19 +37,21 @@ except Exception as e:
 if 'utente_loggato' not in st.session_state: st.session_state.utente_loggato = False
 if 'email_utente' not in st.session_state: st.session_state.email_utente = ""
 
-# --- 2. CONFIGURAZIONE IA E NUOVO RAG (PICKLE) ---
+# --- 2. CONFIGURAZIONE IA E RAG COMPRESSO (GZIP) ---
 GEMINI_API_KEY = "AIzaSyB50kktl5Dg3dBjgDn1ND34cJjomI3StZ4"
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-2.5-flash')
 
-# Funzione per caricare il database RAG una sola volta (veloce!)
+# Funzione per caricare il database RAG compresso una sola volta (veloce!)
 @st.cache_data
 def carica_database_rag():
     try:
         cartella_corrente = os.path.dirname(os.path.abspath(__file__))
-        percorso_pkl = os.path.join(cartella_corrente, "conoscenza_nutrizionista.pkl")
+        # ORA CERCHIAMO IL FILE COMPRESSO .gz
+        percorso_pkl = os.path.join(cartella_corrente, "conoscenza_nutrizionista.pkl.gz")
         if os.path.exists(percorso_pkl):
-            return pd.read_pickle(percorso_pkl)
+            # Diciamo a Pandas di decomprimerlo "al volo"
+            return pd.read_pickle(percorso_pkl, compression="gzip")
         return None
     except Exception as e:
         return None
@@ -60,22 +62,16 @@ def recupera_da_manuali(query_testo, top_k=3):
     if db_rag is None:
         return ""
     try:
-        # 1. Trasformiamo la domanda in numeri (Vettore Query)
         res = genai.embed_content(model="models/gemini-embedding-001", content=query_testo, task_type="retrieval_query")
         query_vec = np.array(res['embedding'])
         
-        # 2. Calcoliamo la distanza matematica (Similarità del Coseno)
         risultati = []
         for item in db_rag:
             doc_vec = np.array(item["vettore"])
-            # Formula del coseno
             sim = np.dot(query_vec, doc_vec) / (np.linalg.norm(query_vec) * np.linalg.norm(doc_vec))
             risultati.append((sim, item["testo"], item["fonte"]))
             
-        # 3. Ordiniamo per i risultati più simili (i punteggi più alti)
         risultati.sort(key=lambda x: x[0], reverse=True)
-        
-        # 4. Estraiamo i migliori testi e citiamo la fonte
         testi_top = [f"(Fonte: {r[2]})\n{r[1]}" for r in risultati[:top_k]]
         return "\n\n---\n\n".join(testi_top)
     except Exception as e:
@@ -229,11 +225,11 @@ else:
 
 st.sidebar.markdown(f"### Bentornato, {nome_utente}! 👋")
 
-# Indicatore visivo RAG
+# Indicatore visivo RAG aggiornato
 if db_rag is not None:
-    st.sidebar.success("📚 Database Scientifico (RAG) Connesso")
+    st.sidebar.success("📚 Database Scientifico (RAG Compresso) Connesso")
 else:
-    st.sidebar.warning("⚠️ File .pkl non trovato")
+    st.sidebar.warning("⚠️ File .pkl.gz non trovato")
 
 vista_temporale = st.sidebar.radio("Orizzonte Temporale:", ["Oggi", "Settimana", "Mese"])
 menu = st.sidebar.radio("Naviga:", ["📊 Dashboard", "📅 Piano Alimentare", "🛒 Lista Spesa", "📜 Storico", "🤖 Chat IA", "⚙️ Impostazioni Profilo"])

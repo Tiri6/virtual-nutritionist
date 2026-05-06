@@ -31,10 +31,15 @@ except ImportError:
 # --- 1. CONFIGURAZIONE PAGINA ---
 st.set_page_config(page_title="VN Pro - AI Nutrition", layout="wide", page_icon="🟢")
 
-# --- 1.1 SISTEMA MULTILINGUA ---
+# --- 1.1 INIZIALIZZAZIONE MEMORIA (IL FIX DELL'ERRORE!) ---
+if 'utente_loggato' not in st.session_state: 
+    st.session_state.utente_loggato = False
+if 'email_utente' not in st.session_state: 
+    st.session_state.email_utente = ""
 if 'lang' not in st.session_state:
     st.session_state.lang = 'it'
 
+# --- 1.2 SISTEMA MULTILINGUA ---
 translations = {
     'it': {
         'nav': "NAVIGAZIONE",
@@ -97,7 +102,7 @@ translations = {
 L = translations[st.session_state.lang]
 
 # --- 2. CONFIGURAZIONE IA E NUOVO RAG (PICKLE COMPRESSO) ---
-GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"] # Usa i secrets in modo sicuro!
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-2.5-flash')
 
@@ -179,7 +184,7 @@ if not st.session_state.utente_loggato:
         """, unsafe_allow_html=True)
         
         try:
-            st.image("logo_vn.png", width=800)
+            st.image("logo_vn.png", width=100)
         except:
             st.markdown("<h1 style='color:#16EC06;'>VN PRO</h1>", unsafe_allow_html=True)
             
@@ -193,7 +198,7 @@ if not st.session_state.utente_loggato:
                 email_input = st.text_input("Email").strip()
                 password_input = st.text_input("Password", type="password").strip()
                 if st.form_submit_button("Accedi"):
-                    if supabase is None: st.error("⚠️ Inserisci URL e KEY di Supabase.")
+                    if supabase is None: st.error("⚠️ Errore connessione Supabase.")
                     else:
                         try:
                             auth_response = supabase.auth.sign_in_with_password({"email": email_input, "password": password_input})
@@ -303,7 +308,6 @@ with st.sidebar:
 
     st.markdown(f"<div style='color:#8e8e93; font-size:12px; font-weight:bold; margin-bottom:5px;'>USER</div><div style='color:white; font-size:14px; margin-bottom:15px;'>{st.session_state.email_utente}</div>", unsafe_allow_html=True)
     
-    # NUOVO SELETTORE LINGUA CON CONFERMA
     opzioni_lingua = ["Italiano", "English"]
     indice_corrente = 0 if st.session_state.lang == 'it' else 1
     lingua_selezionata = st.selectbox("🌍 LINGUA / LANGUAGE", opzioni_lingua, index=indice_corrente)

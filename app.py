@@ -139,70 +139,76 @@ def get_tip_del_giorno(data_odierna, lang):
 
 # --- 3. AUTENTICAZIONE ---
 if not st.session_state.utente_loggato:
-    login_placeholder = st.empty()
-    with login_placeholder.container():
-        st.markdown(get_login_css(), unsafe_allow_html=True)
-        try: st.image("logo_vn.png", width=100)
-        except: st.markdown("<h1 style='color:#16EC06;'>VN PRO</h1>", unsafe_allow_html=True)
-        
-        st.title("Virtual Nutritionist Pro")
-        t_log, t_reg = st.tabs(["🔑 Accedi", "📝 Crea Profilo"])
-        
-        with t_log:
-            with st.form("login"):
-                e_in = st.text_input("Email").strip()
-                p_in = st.text_input("Password", type="password").strip()
-                if st.form_submit_button("Entra"):
+    st.markdown(get_login_css(), unsafe_allow_html=True)
+    try: st.image("logo_vn.png", width=100)
+    except: st.markdown("<h1 style='color:#16EC06;'>VN PRO</h1>", unsafe_allow_html=True)
+    
+    st.title("Virtual Nutritionist Pro")
+    t_log, t_reg = st.tabs(["🔑 Accedi", "📝 Crea Profilo"])
+    
+    with t_log:
+        with st.form("login"):
+            e_in = st.text_input("Email").strip()
+            p_in = st.text_input("Password", type="password").strip()
+            if st.form_submit_button("Entra"):
+                try:
+                    res = supabase.auth.sign_in_with_password({"email": e_in, "password": p_in})
+                    if res.user:
+                        st.session_state.utente_loggato = True
+                        st.session_state.email_utente = res.user.email
+                        st.rerun() # Riavvio pulito, niente più placeholder che crashano
+                except Exception as e: st.error("❌ Credenziali errate.")
+    
+    with t_reg:
+        with st.form("register"):
+            c1, c2 = st.columns(2); r_n = c1.text_input("Nome*").strip(); r_c = c2.text_input("Cognome*").strip()
+            c3, c4 = st.columns(2); r_dob = c3.date_input("Data Nascita*", min_value=datetime(1940,1,1), max_value=datetime.now()); r_sex = c4.selectbox("Sesso*", ["Uomo", "Donna"])
+            c5, c6 = st.columns(2); r_w = c5.number_input("Peso (kg)*", value=70.0, step=0.1); r_h = c6.number_input("Altezza (cm)*", value=170.0, step=1.0)
+            st.divider()
+            r_diet = st.selectbox("Dieta*", ["Onnivoro", "Vegetariano", "Vegano", "Pescatariano", "Chetogenica"])
+            r_sport = st.selectbox("Attività Fisica*", ["Sedentario", "Leggera", "Moderata", "Intensa", "Atleta"])
+            r_obj = st.selectbox("Obiettivo*", ["Dimagrimento", "Mantenimento", "Aumento Massa", "Definizione"])
+            st.divider()
+            r_e = st.text_input("Email*").strip(); r_p = st.text_input("Password (min 6 car.)*", type="password").strip(); r_p_conf = st.text_input("Conferma Password*", type="password").strip()
+            st.markdown("<small>Privacy & GDPR obbligatori</small>", unsafe_allow_html=True)
+            r_priv = st.checkbox("Accetto Privacy Policy*")
+            
+            if st.form_submit_button("Registrati ora"):
+                if not r_priv: st.warning("Accetta la privacy.")
+                elif r_p != r_p_conf: st.warning("Le password non coincidono.")
+                elif len(r_p) < 6: st.warning("Password troppo corta.")
+                else:
                     try:
-                        res = supabase.auth.sign_in_with_password({"email": e_in, "password": p_in})
-                        if res.user:
-                            st.session_state.utente_loggato = True
-                            st.session_state.email_utente = res.user.email
-                            login_placeholder.empty()
-                            st.rerun()
-                    except: st.error("❌ Credenziali errate.")
-        
-        with t_reg:
-            with st.form("register"):
-                c1, c2 = st.columns(2); r_n = c1.text_input("Nome*").strip(); r_c = c2.text_input("Cognome*").strip()
-                c3, c4 = st.columns(2); r_dob = c3.date_input("Data Nascita*", min_value=datetime(1940,1,1), max_value=datetime.now()); r_sex = c4.selectbox("Sesso*", ["Uomo", "Donna"])
-                c5, c6 = st.columns(2); r_w = c5.number_input("Peso (kg)*", value=70.0, step=0.1); r_h = c6.number_input("Altezza (cm)*", value=170.0, step=1.0)
-                st.divider()
-                r_diet = st.selectbox("Dieta*", ["Onnivoro", "Vegetariano", "Vegano", "Pescatariano", "Chetogenica"])
-                r_sport = st.selectbox("Attività Fisica*", ["Sedentario", "Leggera", "Moderata", "Intensa", "Atleta"])
-                r_obj = st.selectbox("Obiettivo*", ["Dimagrimento", "Mantenimento", "Aumento Massa", "Definizione"])
-                st.divider()
-                r_e = st.text_input("Email*").strip(); r_p = st.text_input("Password (min 6 car.)*", type="password").strip(); r_p_conf = st.text_input("Conferma Password*", type="password").strip()
-                st.markdown("<small>Privacy & GDPR obbligatori</small>", unsafe_allow_html=True)
-                r_priv = st.checkbox("Accetto Privacy Policy*")
-                
-                if st.form_submit_button("Registrati ora"):
-                    if not r_priv: st.warning("Accetta la privacy.")
-                    elif r_p != r_p_conf: st.warning("Le password non coincidono.")
-                    elif len(r_p) < 6: st.warning("Password troppo corta.")
-                    else:
-                        try:
-                            auth_res = supabase.auth.sign_up({"email": r_e, "password": r_p})
-                            nuovo_id_uuid = str(auth_res.user.id)
-                            u_tdee = calcola_tdee_professionale(r_w, r_h, r_dob, r_sex, r_sport, r_obj)
-                            
-                            supabase.table("utenti").insert({
-                                "user_id": nuovo_id_uuid, "nome": r_n, "cognome": r_c, "email": r_e,
-                                "sesso": r_sex, "data_nascita": str(r_dob), "peso": r_w, "altezza": r_h,
-                                "dieta": r_diet, "sport": r_sport, "obiettivo": r_obj, "tdee": u_tdee,
-                                "consenso_privacy": True
-                            }).execute()
-                            st.success("✅ Account creato! Effettua il login.")
-                        except Exception as e: st.error(f"Errore: {e}")
+                        auth_res = supabase.auth.sign_up({"email": r_e, "password": r_p})
+                        nuovo_id_uuid = str(auth_res.user.id)
+                        u_tdee = calcola_tdee_professionale(r_w, r_h, r_dob, r_sex, r_sport, r_obj)
+                        
+                        supabase.table("utenti").insert({
+                            "user_id": nuovo_id_uuid, "nome": r_n, "cognome": r_c, "email": r_e,
+                            "sesso": r_sex, "data_nascita": str(r_dob), "peso": r_w, "altezza": r_h,
+                            "dieta": r_diet, "sport": r_sport, "obiettivo": r_obj, "tdee": u_tdee,
+                            "consenso_privacy": True
+                        }).execute()
+                        st.success("✅ Account creato! Effettua il login.")
+                    except Exception as e: st.error(f"Errore: {e}")
     st.stop()
 
-# --- 4. CARICAMENTO DATI ---
+# --- 4. CARICAMENTO DATI E DIAGNOSTICA ---
 pasti, utente, spesa, target_v, id_utente = carica_dati_utente(st.session_state.email_utente)
 
-# Reti di sicurezza per evitare errori a catena se il DB è in ritardo
-if target_v is None: target_v = 2000
-id_utente = str(id_utente) if id_utente else "0"
+# 🚨 RETE DI SALVATAGGIO ANTI-PAGINA BIANCA
+if utente is None or utente.empty or not id_utente or str(id_utente) == "0":
+    st.markdown(get_main_css(), unsafe_allow_html=True)
+    st.error("🚨 ERRORE CRITICO: Dati del profilo inaccessibili.")
+    st.warning("Se hai appena fatto il login, significa che l'app non è riuscita a leggere i tuoi dati dal Cloud di Supabase.")
+    st.info("💡 **SOLUZIONE DEFINITIVA:** Vai su Streamlit Cloud -> Settings -> Secrets e assicurati di aver incollato la chiave `service_role` (segreta) e **NON** la chiave `anon`. La sicurezza RLS sta bloccando l'app!")
+    if st.button("Esci e Ricarica"):
+        st.session_state.utente_loggato = False
+        st.session_state.email_utente = ""
+        st.rerun()
+    st.stop()
 
+id_utente = str(id_utente) # Assicuriamoci che l'UUID sia una stringa sicura
 st.markdown(get_main_css(), unsafe_allow_html=True)
 
 # --- 5. SIDEBAR ---

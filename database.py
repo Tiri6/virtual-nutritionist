@@ -36,12 +36,12 @@ def carica_dati_utente(email):
         target = utente['tdee'].values[0]
         
         # Carichiamo solo i pasti che ci appartengono
-        res_p = supabase.table("pasti").select("*").eq("user_id", int(u_id)).execute()
+        res_p = supabase.table("pasti").select("*").eq("user_id", str(u_id)).execute()
         pasti = pd.DataFrame(res_p.data)
         if not pasti.empty:
             pasti['data_ora'] = pd.to_datetime(pasti['data_ora'])
             
-        res_s = supabase.table("spesa").select("*").eq("user_id", int(u_id)).execute()
+        res_s = supabase.table("spesa").select("*").eq("user_id", str(u_id)).execute()
         spesa = pd.DataFrame(res_s.data)
         
         return pasti, utente, spesa, target, u_id

@@ -186,7 +186,6 @@ if not st.session_state.utente_loggato:
             r_p = c7.text_input("Scegli una Password*", type="password").strip()
             r_p_conf = c8.text_input("Conferma Password*", type="password").strip()
             
-            # IL RIPRISTINO ESATTO DEI TRE FLAG GDPR
             st.markdown("<span style='font-size: 12px; color: #8e8e93; font-weight:bold; letter-spacing:1px;'>CONSENSI LEGALI (GDPR)</span>", unsafe_allow_html=True)
             cons_privacy = st.checkbox("Accetto la Privacy Policy e i Termini di Servizio (Obbligatorio)*")
             cons_mkt = st.checkbox("Acconsento a ricevere comunicazioni di marketing e offerte (Facoltativo)")
@@ -217,21 +216,12 @@ if not st.session_state.utente_loggato:
                     except Exception as e: st.error(f"Errore registrazione: {e}")
     st.stop()
 
-# --- 4. CARICAMENTO DATI E DIAGNOSTICA ---
+# --- 4. CARICAMENTO DATI ---
 pasti, utente, spesa, target_v, id_utente = carica_dati_utente(st.session_state.email_utente)
 
-if utente is None or utente.empty or not id_utente or str(id_utente) == "0":
-    st.markdown(get_main_css(), unsafe_allow_html=True)
-    st.error("🚨 ERRORE CRITICO: Dati del profilo inaccessibili.")
-    st.warning("Se hai appena fatto il login, significa che l'app non è riuscita a leggere i tuoi dati dal Cloud di Supabase.")
-    st.info("💡 **SOLUZIONE DEFINITIVA:** Vai su Streamlit Cloud -> Settings -> Secrets e assicurati di aver incollato la chiave `service_role` (segreta) e **NON** la chiave `anon`. La sicurezza RLS sta bloccando l'app!")
-    if st.button("Esci e Ricarica"):
-        st.session_state.utente_loggato = False
-        st.session_state.email_utente = ""
-        st.rerun()
-    st.stop()
+if target_v is None: target_v = 2000
+id_utente = str(id_utente) if id_utente else "0"
 
-id_utente = str(id_utente)
 st.markdown(get_main_css(), unsafe_allow_html=True)
 
 # --- 5. SIDEBAR ---
@@ -488,11 +478,11 @@ elif menu == L['prof']:
             
             c6, c7 = st.columns(2)
             diete_list = ["Onnivoro", "Vegetariano", "Vegano", "Pescatariano", "Chetogenica"]
-            u_diet = c6.selectbox("Dieta", diete_list, index=diete_list.index(prof.get('dieta', "Onnivoro")))
+            try: u_diet_index = diete_list.index(prof.get('dieta', "Onnivoro"))
+            except: u_diet_index = 0
+            u_diet = c6.selectbox("Dieta", diete_list, index=u_diet_index)
             
             sport_list = ["Sedentario", "Leggera (1-2 volte/sett)", "Moderata (3-4 volte/sett)", "Intensa (5+ volte/sett)", "Atleta Professionista"]
-            
-            # Ripristinata la tendina sport corretta nel profilo per evitare errori
             try: u_sp_index = sport_list.index(prof.get('sport', "Sedentario"))
             except: u_sp_index = 0
             u_sport = c7.selectbox("Attività Fisica", sport_list, index=u_sp_index)

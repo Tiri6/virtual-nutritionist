@@ -59,14 +59,6 @@ def calcola_tdee_professionale(peso, altezza, dob, sesso, sport, obiettivo):
     
     return tdee
 
-# --- 1.3 GESTIONE SESSIONE ---
-if st.session_state.utente_loggato:
-    try:
-        if not supabase.auth.get_session():
-            st.session_state.utente_loggato = False
-            st.rerun()
-    except: pass
-
 translations = {
     'it': {
         'nav': "NAVIGAZIONE", 'dash': "📊 Dashboard", 'stats': "📈 Statistiche", 'diet': "📅 Piano Alimentare",
@@ -206,7 +198,11 @@ if not st.session_state.utente_loggato:
 
 # --- 4. CARICAMENTO DATI ---
 pasti, utente, spesa, target_v, id_utente = carica_dati_utente(st.session_state.email_utente)
-id_utente = str(id_utente) # Assicuriamoci che l'UUID sia una stringa
+
+# Reti di sicurezza per evitare errori a catena se il DB è in ritardo
+if target_v is None: target_v = 2000
+id_utente = str(id_utente) if id_utente else "0"
+
 st.markdown(get_main_css(), unsafe_allow_html=True)
 
 # --- 5. SIDEBAR ---

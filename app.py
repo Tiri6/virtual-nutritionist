@@ -144,7 +144,7 @@ if not st.session_state.utente_loggato:
     except: st.markdown("<h1 style='color:#16EC06;'>VN PRO</h1>", unsafe_allow_html=True)
     
     st.title("Virtual Nutritionist Pro")
-    t_log, t_reg = st.tabs(["🔑 Accedi", "📝 Crea Profilo"])
+    t_log, t_reg = st.tabs(["🔑 Accedi", "📝 Crea Profilo Completo"])
     
     with t_log:
         with st.form("login"):
@@ -156,27 +156,49 @@ if not st.session_state.utente_loggato:
                     if res.user:
                         st.session_state.utente_loggato = True
                         st.session_state.email_utente = res.user.email
-                        st.rerun() # Riavvio pulito, niente più placeholder che crashano
+                        st.rerun() 
                 except Exception as e: st.error("❌ Credenziali errate.")
     
     with t_reg:
+        st.subheader("Raccontaci di te")
         with st.form("register"):
-            c1, c2 = st.columns(2); r_n = c1.text_input("Nome*").strip(); r_c = c2.text_input("Cognome*").strip()
-            c3, c4 = st.columns(2); r_dob = c3.date_input("Data Nascita*", min_value=datetime(1940,1,1), max_value=datetime.now()); r_sex = c4.selectbox("Sesso*", ["Uomo", "Donna"])
-            c5, c6 = st.columns(2); r_w = c5.number_input("Peso (kg)*", value=70.0, step=0.1); r_h = c6.number_input("Altezza (cm)*", value=170.0, step=1.0)
-            st.divider()
-            r_diet = st.selectbox("Dieta*", ["Onnivoro", "Vegetariano", "Vegano", "Pescatariano", "Chetogenica"])
-            r_sport = st.selectbox("Attività Fisica*", ["Sedentario", "Leggera", "Moderata", "Intensa", "Atleta"])
-            r_obj = st.selectbox("Obiettivo*", ["Dimagrimento", "Mantenimento", "Aumento Massa", "Definizione"])
-            st.divider()
-            r_e = st.text_input("Email*").strip(); r_p = st.text_input("Password (min 6 car.)*", type="password").strip(); r_p_conf = st.text_input("Conferma Password*", type="password").strip()
-            st.markdown("<small>Privacy & GDPR obbligatori</small>", unsafe_allow_html=True)
-            r_priv = st.checkbox("Accetto Privacy Policy*")
+            c1, c2 = st.columns(2)
+            r_n = c1.text_input("Nome*").strip()
+            r_c = c2.text_input("Cognome*").strip()
             
-            if st.form_submit_button("Registrati ora"):
-                if not r_priv: st.warning("Accetta la privacy.")
-                elif r_p != r_p_conf: st.warning("Le password non coincidono.")
-                elif len(r_p) < 6: st.warning("Password troppo corta.")
+            c3, c4 = st.columns(2)
+            r_dob = c3.date_input("Data Nascita*", min_value=datetime(1920,1,1), max_value=datetime.now())
+            r_sex = c4.selectbox("Sesso*", ["Uomo", "Donna"])
+            
+            c5, c6 = st.columns(2)
+            r_w = c5.number_input("Peso (kg)*", min_value=30.0, max_value=250.0, value=70.0, step=0.1)
+            r_h = c6.number_input("Altezza (cm)*", min_value=100.0, max_value=250.0, value=170.0, step=1.0)
+            
+            st.divider()
+            r_diet = st.selectbox("Preferenza Culinaria*", ["Onnivoro", "Carnivoro", "Vegetariano", "Vegano", "Pescatariano"])
+            r_sport = st.selectbox("Attività Fisica*", ["Sedentario", "Leggera (1-2 volte/sett)", "Moderata (3-4 volte/sett)", "Intensa (5+ volte/sett)", "Atleta Professionista"])
+            r_obj = st.selectbox("Obiettivo Principale*", ["Dimagrimento", "Definizione Muscolare", "Mantenimento", "Aumento Massa Muscolare", "Ricomposizione Corporea"])
+            
+            st.divider()
+            r_e = st.text_input("Email*").strip()
+            
+            c7, c8 = st.columns(2)
+            r_p = c7.text_input("Scegli una Password*", type="password").strip()
+            r_p_conf = c8.text_input("Conferma Password*", type="password").strip()
+            
+            # IL RIPRISTINO ESATTO DEI TRE FLAG GDPR
+            st.markdown("<span style='font-size: 12px; color: #8e8e93; font-weight:bold; letter-spacing:1px;'>CONSENSI LEGALI (GDPR)</span>", unsafe_allow_html=True)
+            cons_privacy = st.checkbox("Accetto la Privacy Policy e i Termini di Servizio (Obbligatorio)*")
+            cons_mkt = st.checkbox("Acconsento a ricevere comunicazioni di marketing e offerte (Facoltativo)")
+            cons_prof = st.checkbox("Acconsento all'analisi dei miei dati per fini statistici e di profilazione (Facoltativo)")
+            
+            if st.form_submit_button("Crea Account e Salva Profilo"):
+                if not cons_privacy: 
+                    st.warning("⚠️ Devi accettare la Privacy Policy per poterti registrare.")
+                elif r_p != r_p_conf: 
+                    st.warning("⚠️ Le password non coincidono.")
+                elif len(r_p) < 6: 
+                    st.warning("⚠️ Password troppo corta.")
                 else:
                     try:
                         auth_res = supabase.auth.sign_up({"email": r_e, "password": r_p})
@@ -187,16 +209,17 @@ if not st.session_state.utente_loggato:
                             "user_id": nuovo_id_uuid, "nome": r_n, "cognome": r_c, "email": r_e,
                             "sesso": r_sex, "data_nascita": str(r_dob), "peso": r_w, "altezza": r_h,
                             "dieta": r_diet, "sport": r_sport, "obiettivo": r_obj, "tdee": u_tdee,
-                            "consenso_privacy": True
+                            "consenso_privacy": cons_privacy,
+                            "consenso_marketing": cons_mkt,
+                            "consenso_profilazione": cons_prof
                         }).execute()
                         st.success("✅ Account creato! Effettua il login.")
-                    except Exception as e: st.error(f"Errore: {e}")
+                    except Exception as e: st.error(f"Errore registrazione: {e}")
     st.stop()
 
 # --- 4. CARICAMENTO DATI E DIAGNOSTICA ---
 pasti, utente, spesa, target_v, id_utente = carica_dati_utente(st.session_state.email_utente)
 
-# 🚨 RETE DI SALVATAGGIO ANTI-PAGINA BIANCA
 if utente is None or utente.empty or not id_utente or str(id_utente) == "0":
     st.markdown(get_main_css(), unsafe_allow_html=True)
     st.error("🚨 ERRORE CRITICO: Dati del profilo inaccessibili.")
@@ -208,7 +231,7 @@ if utente is None or utente.empty or not id_utente or str(id_utente) == "0":
         st.rerun()
     st.stop()
 
-id_utente = str(id_utente) # Assicuriamoci che l'UUID sia una stringa sicura
+id_utente = str(id_utente)
 st.markdown(get_main_css(), unsafe_allow_html=True)
 
 # --- 5. SIDEBAR ---
@@ -467,11 +490,17 @@ elif menu == L['prof']:
             diete_list = ["Onnivoro", "Vegetariano", "Vegano", "Pescatariano", "Chetogenica"]
             u_diet = c6.selectbox("Dieta", diete_list, index=diete_list.index(prof.get('dieta', "Onnivoro")))
             
-            sport_list = ["Sedentario", "Leggera", "Moderata", "Intensa", "Atleta"]
-            u_sport = c7.selectbox("Attività Fisica", sport_list, index=sport_list.index(prof.get('sport', "Sedentario")))
+            sport_list = ["Sedentario", "Leggera (1-2 volte/sett)", "Moderata (3-4 volte/sett)", "Intensa (5+ volte/sett)", "Atleta Professionista"]
             
-            obj_list = ["Dimagrimento", "Mantenimento", "Aumento Massa", "Definizione"]
-            u_obj = st.selectbox("Obiettivo", obj_list, index=obj_list.index(prof.get('obiettivo', "Mantenimento")))
+            # Ripristinata la tendina sport corretta nel profilo per evitare errori
+            try: u_sp_index = sport_list.index(prof.get('sport', "Sedentario"))
+            except: u_sp_index = 0
+            u_sport = c7.selectbox("Attività Fisica", sport_list, index=u_sp_index)
+            
+            obj_list = ["Dimagrimento", "Definizione Muscolare", "Mantenimento", "Aumento Massa Muscolare", "Ricomposizione Corporea"]
+            try: u_ob_index = obj_list.index(prof.get('obiettivo', "Mantenimento"))
+            except: u_ob_index = 2
+            u_obj = st.selectbox("Obiettivo", obj_list, index=u_ob_index)
             
             if st.form_submit_button("💾 Salva Modifiche e Ricalcola TDEE", type="primary"):
                 nuovo_tdee = calcola_tdee_professionale(u_w, u_h, u_dob, u_sex, u_sport, u_obj)
@@ -494,8 +523,8 @@ elif menu == L['prof']:
                 
     with t3:
         with st.form("priv"):
-            u_mkt = st.checkbox("Marketing", value=bool(prof.get('consenso_marketing', False)))
-            u_prof = st.checkbox("Profilazione", value=bool(prof.get('consenso_profilazione', False)))
+            u_mkt = st.checkbox("Acconsento a ricevere comunicazioni di marketing e offerte", value=bool(prof.get('consenso_marketing', False)))
+            u_prof = st.checkbox("Acconsento all'analisi dei miei dati per fini statistici e di profilazione", value=bool(prof.get('consenso_profilazione', False)))
             if st.form_submit_button("Salva Privacy", type="primary"):
                 supabase.table("utenti").update({"consenso_marketing": u_mkt, "consenso_profilazione": u_prof}).eq("user_id", str(id_utente)).execute()
                 st.success("Privacy aggiornata.")

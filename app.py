@@ -25,22 +25,47 @@ try:
     FPDF_AVAILABLE = True
 except ImportError: FPDF_AVAILABLE = False
 
+# --- 1. CONFIGURAZIONE PAGINA ---
 st.set_page_config(page_title="VN Pro - AI Nutrition", layout="wide", page_icon="🟢")
 
-if 'utente_loggato' not in st.session_state: st.session_state.utente_loggato = False
-if 'email_utente' not in st.session_state: st.session_state.email_utente = ""
-if 'lang' not in st.session_state: st.session_state.lang = 'it'
+# --- 1.1 INIZIALIZZAZIONE MEMORIA ---
+if 'utente_loggato' not in st.session_state: 
+    st.session_state.utente_loggato = False
+if 'email_utente' not in st.session_state: 
+    st.session_state.email_utente = ""
+if 'lang' not in st.session_state:
+    st.session_state.lang = 'it'
 
-# --- GESTIONE SCADENZA SESSIONE (FIX MEDIO) ---
+# --- 1.2 FUNZIONE CENTRALE CALCOLO TDEE (COERENZA 100%) ---
+def calcola_tdee_professionale(peso, altezza, dob, sesso, sport, obiettivo):
+    oggi_data = datetime.now().date()
+    eta = oggi_data.year - dob.year - ((oggi_data.month, oggi_data.day) < (dob.month, dob.day))
+    
+    bmr = (10 * peso) + (6.25 * altezza) - (5 * eta) + (5 if sesso == "Uomo" else -161)
+    
+    moltiplicatori = {
+        "Sedentario": 1.2,
+        "Leggera": 1.375,
+        "Moderata": 1.55,
+        "Intensa": 1.725,
+        "Atleta": 1.9
+    }
+    chiave_sport = sport.split(" ")[0]
+    tdee = bmr * moltiplicatori.get(chiave_sport, 1.2)
+    
+    if "Dimagrimento" in obiettivo: tdee -= 400
+    elif "Aumento" in obiettivo: tdee += 300
+    elif "Definizione" in obiettivo: tdee -= 250
+    
+    return tdee
+
+# --- 1.3 GESTIONE SESSIONE ---
 if st.session_state.utente_loggato:
     try:
-        session = supabase.auth.get_session()
-        if not session:
+        if not supabase.auth.get_session():
             st.session_state.utente_loggato = False
-            st.session_state.email_utente = ""
             st.rerun()
-    except Exception:
-        pass
+    except: pass
 
 translations = {
     'it': {
@@ -68,6 +93,7 @@ translations = {
 }
 L = translations[st.session_state.lang]
 
+# --- 2. CONFIGURAZIONE IA ---
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-2.5-flash')
@@ -75,11 +101,10 @@ model = genai.GenerativeModel('gemini-2.5-flash')
 @st.cache_data
 def carica_database_rag():
     try:
-        cartella_corrente = os.path.dirname(os.path.abspath(__file__))
-        percorso_pkl = os.path.join(cartella_corrente, "conoscenza_nutrizionista.pkl.gz")
-        if os.path.exists(percorso_pkl): return pd.read_pickle(percorso_pkl, compression="gzip")
+        p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "conoscenza_nutrizionista.pkl.gz")
+        if os.path.exists(p): return pd.read_pickle(p, compression="gzip")
         return None
-    except Exception: return None
+    except: return None
 
 db_rag = carica_database_rag()
 
@@ -87,16 +112,15 @@ def recupera_da_manuali(query_testo, top_k=3):
     if db_rag is None: return ""
     try:
         res = genai.embed_content(model="models/gemini-embedding-001", content=query_testo, task_type="retrieval_query")
-        query_vec = np.array(res['embedding'])
-        risultati = []
+        q_v = np.array(res['embedding'])
+        results = []
         for item in db_rag:
-            doc_vec = np.array(item["vettore"])
-            sim = np.dot(query_vec, doc_vec) / (np.linalg.norm(query_vec) * np.linalg.norm(doc_vec))
-            risultati.append((sim, item["testo"], item["fonte"]))
-        risultati.sort(key=lambda x: x[0], reverse=True)
-        testi_top = [f"(Fonte: {r[2]})\n{r[1]}" for r in risultati[:top_k]]
-        return "\n\n---\n\n".join(testi_top)
-    except Exception: return ""
+            d_v = np.array(item["vettore"])
+            sim = np.dot(q_v, d_v) / (np.linalg.norm(q_v) * np.linalg.norm(d_v))
+            results.append((sim, item["testo"], item["fonte"]))
+        results.sort(key=lambda x: x[0], reverse=True)
+        return "\n\n---\n\n".join([f"(Fonte: {r[2]})\n{r[1]}" for r in results[:top_k]])
+    except: return ""
 
 def genera_pdf_dieta(testo_markdown):
     testo_pulito = testo_markdown.replace('**', '').replace('* ', '- ').encode('latin-1', 'replace').decode('latin-1')
@@ -121,104 +145,84 @@ def get_tip_del_giorno(data_odierna, lang):
     try: return model.generate_content(prompt).text.strip().replace('**', '')
     except: return "Scegli carboidrati complessi per energia costante." if lang == 'it' else "Choose complex carbs for steady energy."
 
-# --- LOGIN E REGISTRAZIONE ---
+# --- 3. AUTENTICAZIONE ---
 if not st.session_state.utente_loggato:
     login_placeholder = st.empty()
     with login_placeholder.container():
         st.markdown(get_login_css(), unsafe_allow_html=True)
         try: st.image("logo_vn.png", width=100)
         except: st.markdown("<h1 style='color:#16EC06;'>VN PRO</h1>", unsafe_allow_html=True)
-            
+        
         st.title("Virtual Nutritionist Pro")
-        tab_login, tab_registrazione = st.tabs(["🔑 Accedi", "📝 Crea Profilo Completo"])
+        t_log, t_reg = st.tabs(["🔑 Accedi", "📝 Crea Profilo"])
         
-        with tab_login:
-            with st.form("login_form"):
-                email_input = st.text_input("Email").strip()
-                password_input = st.text_input("Password", type="password").strip()
-                if st.form_submit_button("Accedi"):
-                    if supabase is None: st.error("⚠️ Errore connessione Supabase.")
+        with t_log:
+            with st.form("login"):
+                e_in = st.text_input("Email").strip()
+                p_in = st.text_input("Password", type="password").strip()
+                if st.form_submit_button("Entra"):
+                    try:
+                        res = supabase.auth.sign_in_with_password({"email": e_in, "password": p_in})
+                        if res.user:
+                            st.session_state.utente_loggato = True
+                            st.session_state.email_utente = res.user.email
+                            login_placeholder.empty()
+                            st.rerun()
+                    except: st.error("❌ Credenziali errate.")
+        
+        with t_reg:
+            with st.form("register"):
+                c1, c2 = st.columns(2); r_n = c1.text_input("Nome*").strip(); r_c = c2.text_input("Cognome*").strip()
+                c3, c4 = st.columns(2); r_dob = c3.date_input("Data Nascita*", min_value=datetime(1940,1,1), max_value=datetime.now()); r_sex = c4.selectbox("Sesso*", ["Uomo", "Donna"])
+                c5, c6 = st.columns(2); r_w = c5.number_input("Peso (kg)*", value=70.0, step=0.1); r_h = c6.number_input("Altezza (cm)*", value=170.0, step=1.0)
+                st.divider()
+                r_diet = st.selectbox("Dieta*", ["Onnivoro", "Vegetariano", "Vegano", "Pescatariano", "Chetogenica"])
+                r_sport = st.selectbox("Attività Fisica*", ["Sedentario", "Leggera", "Moderata", "Intensa", "Atleta"])
+                r_obj = st.selectbox("Obiettivo*", ["Dimagrimento", "Mantenimento", "Aumento Massa", "Definizione"])
+                st.divider()
+                r_e = st.text_input("Email*").strip(); r_p = st.text_input("Password (min 6 car.)*", type="password").strip(); r_p_conf = st.text_input("Conferma Password*", type="password").strip()
+                st.markdown("<small>Privacy & GDPR obbligatori</small>", unsafe_allow_html=True)
+                r_priv = st.checkbox("Accetto Privacy Policy*")
+                
+                if st.form_submit_button("Registrati ora"):
+                    if not r_priv: st.warning("Accetta la privacy.")
+                    elif r_p != r_p_conf: st.warning("Le password non coincidono.")
+                    elif len(r_p) < 6: st.warning("Password troppo corta.")
                     else:
                         try:
-                            auth_response = supabase.auth.sign_in_with_password({"email": email_input, "password": password_input})
-                            if auth_response.user:
-                                st.session_state.utente_loggato = True
-                                st.session_state.email_utente = auth_response.user.email
-                                login_placeholder.empty()
-                                st.rerun() 
-                        except Exception: st.error("❌ Credenziali non valide.")
-        
-        with tab_registrazione:
-            st.subheader("Raccontaci di te")
-            with st.form("register_form"):
-                c1, c2 = st.columns(2); reg_nome = c1.text_input("Nome*").strip(); reg_cognome = c2.text_input("Cognome*").strip()
-                c3, c4 = st.columns(2); reg_dob = c3.date_input("Data di Nascita*", min_value=datetime(1920, 1, 1), max_value=datetime.now())
-                reg_sesso = c4.selectbox("Sesso*", ["Uomo", "Donna"])
-                c4_1, c4_2 = st.columns(2); reg_peso = c4_1.number_input("Peso (kg)*", min_value=30.0, max_value=250.0, value=70.0, step=0.1); reg_altezza = c4_2.number_input("Altezza (cm)*", min_value=100.0, max_value=250.0, value=170.0, step=1.0)
-                st.divider()
-                c5, c6 = st.columns(2); reg_dieta = c5.selectbox("Preferenza Culinaria*", ["Onnivoro", "Carnivoro", "Vegetariano", "Vegano", "Pescatariano"])
-                reg_sport = c6.selectbox("Attività Fisica*", ["Sedentario", "Leggera (1-2 volte/sett)", "Moderata (3-4 volte/sett)", "Intensa (5+ volte/sett)", "Atleta Professionista"])
-                reg_obiettivo = st.selectbox("Obiettivo Principale*", ["Dimagrimento", "Definizione Muscolare", "Mantenimento", "Aumento Massa Muscolare", "Ricomposizione Corporea"])
-                st.divider()
-                reg_email = st.text_input("Email*").strip()
-                c7, c8 = st.columns(2); reg_password = c7.text_input("Scegli una Password*", type="password").strip(); reg_password_confirm = c8.text_input("Conferma Password*", type="password").strip()
-                
-                st.markdown("<span style='font-size: 12px; color: #8e8e93; font-weight:bold; letter-spacing:1px;'>CONSENSI LEGALI (GDPR)</span>", unsafe_allow_html=True)
-                cons_privacy = st.checkbox("Accetto la Privacy Policy e i Termini di Servizio (Obbligatorio)*")
-                cons_mkt = st.checkbox("Acconsento a ricevere comunicazioni di marketing e offerte (Facoltativo)")
-                cons_prof = st.checkbox("Acconsento all'analisi dei miei dati per fini statistici e di profilazione (Facoltativo)")
-                
-                if st.form_submit_button("Crea Account e Salva Profilo"):
-                    if not cons_privacy: st.warning("⚠️ Devi accettare la Privacy Policy.")
-                    elif reg_password != reg_password_confirm: st.warning("⚠️ Le password non coincidono.")
-                    elif len(reg_password) < 6: st.warning("⚠️ Password troppo corta.")
-                    else:
-                        try:
-                            res = supabase.auth.sign_up({"email": reg_email, "password": reg_password})
-                            # FIX ALTO: Uso l'UUID generato dal sistema Auth di Supabase!
-                            nuovo_id_uuid = str(res.user.id)
-                            
-                            oggi_data = datetime.now().date()
-                            eta = oggi_data.year - reg_dob.year - ((oggi_data.month, oggi_data.day) < (reg_dob.month, reg_dob.day))
-                            bmr = (10 * reg_peso) + (6.25 * reg_altezza) - (5 * eta) + (5 if reg_sesso=="Uomo" else -161)
-                            moltiplicatori = {"Sedentario": 1.2, "Leggera (1-2 volte/sett)": 1.375, "Moderata (3-4 volte/sett)": 1.55, "Intensa (5+ volte/sett)": 1.725, "Atleta Professionista": 1.9}
-                            tdee_calcolato = bmr * moltiplicatori.get(reg_sport, 1.2)
-                            if "Dimagrimento" in reg_obiettivo or "Definizione" in reg_obiettivo: tdee_calcolato -= 400 
-                            elif "Aumento Massa" in reg_obiettivo: tdee_calcolato += 300 
+                            auth_res = supabase.auth.sign_up({"email": r_e, "password": r_p})
+                            nuovo_id_uuid = str(auth_res.user.id)
+                            u_tdee = calcola_tdee_professionale(r_w, r_h, r_dob, r_sex, r_sport, r_obj)
                             
                             supabase.table("utenti").insert({
-                                "user_id": nuovo_id_uuid, "nome": reg_nome, "cognome": reg_cognome, "email": reg_email, 
-                                "sesso": reg_sesso, "data_nascita": str(reg_dob), "dieta": reg_dieta, 
-                                "sport": reg_sport, "obiettivo": reg_obiettivo, "peso": reg_peso, 
-                                "altezza": reg_altezza, "tdee": tdee_calcolato, "consenso_privacy": cons_privacy,
-                                "consenso_marketing": cons_mkt, "consenso_profilazione": cons_prof
+                                "user_id": nuovo_id_uuid, "nome": r_n, "cognome": r_c, "email": r_e,
+                                "sesso": r_sex, "data_nascita": str(r_dob), "peso": r_w, "altezza": r_h,
+                                "dieta": r_diet, "sport": r_sport, "obiettivo": r_obj, "tdee": u_tdee,
+                                "consenso_privacy": True
                             }).execute()
-                            st.success(f"✅ Profilo creato! Fabbisogno calcolato: {tdee_calcolato:.0f} kcal. Vai su 'Accedi'.")
-                        except Exception as e: st.error(f"Errore registrazione: {e}")
-    st.stop() 
+                            st.success("✅ Account creato! Effettua il login.")
+                        except Exception as e: st.error(f"Errore: {e}")
+    st.stop()
 
-# --- DASHBOARD UTENTE LOGGATO ---
+# --- 4. CARICAMENTO DATI ---
 pasti, utente, spesa, target_v, id_utente = carica_dati_utente(st.session_state.email_utente)
-id_utente = str(id_utente) # FIX: Assicuriamoci che sia trattato come stringa per query future
-
+id_utente = str(id_utente) # Assicuriamoci che l'UUID sia una stringa
 st.markdown(get_main_css(), unsafe_allow_html=True)
 
+# --- 5. SIDEBAR ---
 with st.sidebar:
-    st.markdown("<div style='text-align: center;'>", unsafe_allow_html=True)
+    st.markdown("<div style='text-align:center;'>", unsafe_allow_html=True)
     try: st.image("logo_vn.png", width=120)
-    except: st.markdown("<h2 style='color:#16EC06; font-weight:900;'>VN PRO</h2>", unsafe_allow_html=True)
+    except: st.markdown("<h2 style='color:#16EC06;'>VN PRO</h2>", unsafe_allow_html=True)
     st.markdown("</div><br>", unsafe_allow_html=True)
-
-    st.markdown(f"<div style='color:#8e8e93; font-size:12px; font-weight:bold; margin-bottom:5px;'>USER</div><div style='color:white; font-size:14px; margin-bottom:15px;'>{st.session_state.email_utente}</div>", unsafe_allow_html=True)
     
-    opzioni_lingua = ["Italiano", "English"]
-    indice_corrente = 0 if st.session_state.lang == 'it' else 1
-    lingua_selezionata = st.selectbox("🌍 LINGUA / LANGUAGE", opzioni_lingua, index=indice_corrente)
-    if st.button("Conferma / Confirm", use_container_width=True):
-        st.session_state.lang = 'it' if lingua_selezionata == "Italiano" else 'en'
+    st.markdown(f"<small style='color:#8e8e93;'>UTENTE</small><br><b>{st.session_state.email_utente}</b>", unsafe_allow_html=True)
+    sel_lang = st.selectbox("🌍 LINGUA / LANGUAGE", ["Italiano", "English"], index=0 if st.session_state.lang == 'it' else 1)
+    if st.button("OK / Confirm"):
+        st.session_state.lang = 'it' if sel_lang == "Italiano" else 'en'
         st.rerun()
     st.divider()
-
+    
 if "uploader_key" not in st.session_state: st.session_state.uploader_key = 0
 if "mostra_form" not in st.session_state: st.session_state.mostra_form = False
 
@@ -232,6 +236,7 @@ with st.sidebar:
         st.session_state.email_utente = ""
         st.rerun()
 
+# --- 6. LOGICA PAGINE ---
 oggi = datetime.now().date()
 lang_str = "ITALIANO" if st.session_state.lang == 'it' else "ENGLISH"
 
@@ -241,10 +246,9 @@ def pulisci_valore(testo):
     except: return 0.0
 
 if menu == L['dash']:
-    if utente.empty: st.markdown("<h2>Dashboard Personale</h2>", unsafe_allow_html=True)
-    else:
-        st.markdown(f"<h2>{L['welcome']}, {utente['nome'].values[0]}</h2>", unsafe_allow_html=True)
-        st.markdown(f"<p style='color:#8e8e93; margin-top:-10px; margin-bottom:20px;'>{L['summary']}</p>", unsafe_allow_html=True)
+    prof = utente.iloc[0] if not utente.empty else {}
+    st.markdown(f"<h2>{L['welcome']}, {prof.get('nome', 'User')} 🟢</h2>", unsafe_allow_html=True)
+    st.markdown(f"<p style='color:#8e8e93; margin-top:-10px; margin-bottom:20px;'>{L['summary']}</p>", unsafe_allow_html=True)
     
     df_p_v = pd.DataFrame()
     if not pasti.empty:
@@ -260,13 +264,13 @@ if menu == L['dash']:
     k1.markdown(f"<div class='metric-card'><span class='metric-label'>🎯 {L['target']}</span><span class='metric-value'>{target_v:.0f}</span></div>", unsafe_allow_html=True)
     k2.markdown(f"<div class='metric-card'><span class='metric-label'>🍎 {L['assunte']}</span><span class='metric-value'>{assunte:.0f}</span></div>", unsafe_allow_html=True)
     res_col = "#16EC06" if residuo >= 0 else "#e54343"
-    k3.markdown(f"<div class='metric-card' style='border-top: 3px solid {res_col};'><span class='metric-label'>🔋 {L['residuo']}</span><span class='metric-value' style='color:{res_col}'>{residuo:.0f}</span></div>", unsafe_allow_html=True)
+    k3.markdown(f"<div class='metric-card' style='border-top:2px solid {res_col}'><span class='metric-label'>🔋 {L['residuo']}</span><span class='metric-value' style='color:{res_col}'>{residuo:.0f}</span></div>", unsafe_allow_html=True)
     rat_col = "#16EC06" if rating_medio >= 75 else "#e5a443" if rating_medio >= 50 else "#e54343"
     rat_val = f"{rating_medio:.0f}" if rating_medio > 0 else "--"
     k4.markdown(f"<div class='metric-card'><span class='metric-label'>⭐ {L['nutriscore']}</span><span class='metric-value' style='color:{rat_col}'>{rat_val}</span></div>", unsafe_allow_html=True)
 
-    col_left, col_right = st.columns([2, 1])
-    with col_left:
+    c_l, c_r = st.columns([2, 1])
+    with c_l:
         st.markdown(f"<h4 style='font-size: 16px; color: #16EC06; letter-spacing: 1px; text-transform: uppercase;'>{L['dist_macro']}</h4>", unsafe_allow_html=True)
         if not df_p_v.empty:
             c_carbo, c_prot, c_fat = df_p_v['carboidrati'].sum(), df_p_v['proteine'].sum(), df_p_v['grassi'].sum()
@@ -275,36 +279,38 @@ if menu == L['dash']:
             st.plotly_chart(fig_p, use_container_width=True)
         else: st.info(L['low_data'])
 
-    with col_right:
+    with c_r:
         st.markdown(f"<h4 style='font-size: 16px; color: #16EC06; letter-spacing: 1px; text-transform: uppercase;'>{L['reg_pasto']}</h4>", unsafe_allow_html=True)
-        up_file = st.file_uploader(L['upload_action'], type=['jpg', 'jpeg', 'png', 'heic', 'avif'], key=f"up_{st.session_state.uploader_key}", label_visibility="collapsed")
-        if up_file:
+        up = st.file_uploader(L['upload_action'], type=['jpg','jpeg','png','heic','avif'], key=f"up_{st.session_state.uploader_key}", label_visibility="collapsed")
+        if up:
             try:
-                img = Image.open(up_file).convert('RGB'); st.image(img, use_container_width=True)
+                img = Image.open(up).convert('RGB'); st.image(img, use_container_width=True)
                 if st.button(L['analizza'], use_container_width=True):
                     with st.spinner("IA..."):
-                        prompt = f"Analizza foto. Formato ESATTO. Traduci Descrizione e Spiegazione in {lang_str}: DATA_BLOCK|Nome Piatto|Kcal|Carbo|Prot|Fat|FatSaturi|Score|Desc_2righe|Spiegazione_2righe"
-                        st.session_state.dati_tecnici = model.generate_content([prompt, img]).text.strip().replace('\n', '')
+                        p = f"Analizza foto. Formato ESATTO. Traduci Descrizione e Spiegazione in {lang_str}: DATA_BLOCK|Nome Piatto|Kcal|Carbo|Prot|Fat|FatSaturi|Score|Desc_2righe|Spiegazione_2righe"
+                        st.session_state.dati_tecnici = model.generate_content([p, img]).text.strip().replace('\n', '')
                         st.session_state.mostra_form = True; st.rerun()
             except Exception: st.error("⚠️ Errore file.")
-
-        if st.session_state.mostra_form:
+        
+        if st.session_state.get('mostra_form'):
             m = re.search(r"DATA_BLOCK\|(.*?)\|(.*?)\|(.*?)\|(.*?)\|(.*?)\|(.*?)\|(.*?)\|(.*?)\|(.*)", st.session_state.dati_tecnici)
             if m:
-                n_i, k_i, c_i, p_i, f_i, sat_i, r_i, desc_i, spiegazione_i = m.groups()
-                st.markdown(f"<div style='background-color:#1c1c1e; padding:15px; border-radius:12px; margin-bottom:15px; border:1px solid #16EC06;'><h3 style='margin-top:0; color:#16EC06 !important;'>{n_i}</h3><span style='color:#8e8e93;'>{desc_i}</span><br><br><span style='font-size:11px; color:#8e8e93; font-weight:bold;'>{L['estimated_values']}</span><br>🔥 {k_i} kcal | 🥑 {c_i}g C | 🥩 {p_i}g P | 🧈 {f_i}g F (Sat: {sat_i}g)<div style='background-color:#121212; padding:10px; border-radius:8px; margin-top:10px;'><strong style='color:#16EC06;'>Score: {r_i}/100</strong><br><span style='font-size:13px; color:#e5e5ea;'><i>{spiegazione_i}</i></span></div></div>", unsafe_allow_html=True)
+                n_i, k_i, c_i, p_i, f_i, sat_i, r_i, d_i, s_i = m.groups()
+                st.markdown(f"<div style='background-color:#1c1c1e; padding:15px; border-radius:12px; margin-bottom:15px; border:1px solid #16EC06;'><h3 style='margin-top:0; color:#16EC06 !important;'>{n_i}</h3><span style='color:#8e8e93;'>{d_i}</span><br><br><span style='font-size:11px; color:#8e8e93; font-weight:bold;'>{L['estimated_values']}</span><br>🔥 {k_i} kcal | 🥑 {c_i}g C | 🥩 {p_i}g P | 🧈 {f_i}g F (Sat: {sat_i}g)<div style='background-color:#121212; padding:10px; border-radius:8px; margin-top:10px;'><strong style='color:#16EC06;'>Score: {r_i}/100</strong><br><span style='font-size:13px; color:#e5e5ea;'><i>{s_i}</i></span></div></div>", unsafe_allow_html=True)
                 with st.form("save"):
                     u_n = st.text_input("Dish name", value=n_i)
                     u_c = st.selectbox("Meal", ["Colazione", "Pranzo", "Cena", "Spuntino"])
                     if st.form_submit_button(L['save_cloud'], type="primary"):
-                        supabase.table("pasti").insert({"user_id": id_utente, "descrizione": f"{u_n} ({u_c})", "calorie": pulisci_valore(k_i), "carboidrati": pulisci_valore(c_i), "proteine": pulisci_valore(p_i), "grassi": pulisci_valore(f_i), "rating": pulisci_valore(r_i), "dettaglio_json": f"Grassi saturi: {sat_i}g. Note: {spiegazione_i}"}).execute()
+                        dettagli_extra = f"Grassi saturi: {sat_i}g. Note: {s_i}"
+                        supabase.table("pasti").insert({"user_id": id_utente, "descrizione": f"{u_n} ({u_c})", "calorie": pulisci_valore(k_i), "carboidrati": pulisci_valore(c_i), "proteine": pulisci_valore(p_i), "grassi": pulisci_valore(f_i), "rating": pulisci_valore(r_i), "dettaglio_json": dettagli_extra}).execute()
                         st.session_state.mostra_form = False; st.session_state.uploader_key += 1; st.rerun()
 
     st.markdown("<br><hr style='border-color: #2c2c2e;'>", unsafe_allow_html=True)
     st.markdown(f"<h4 style='font-size: 14px; color: #16EC06; letter-spacing: 1px; text-transform: uppercase;'>💡 {L['tip']}</h4>", unsafe_allow_html=True)
     msg_spinner = "A breve il tuo consiglio giornaliero personalizzato..." if st.session_state.lang == 'it' else "Preparing your personalized daily tip..."
-    with st.spinner(msg_spinner): tip_oggi = get_tip_del_giorno(oggi, st.session_state.lang)
-    st.markdown(f"<div style='background-color:#1c1c1e; padding:15px; border-radius:12px; border-left:4px solid #16EC06;'><span style='color:#e5e5ea; font-style:italic;'>\"{tip_oggi}\"</span></div>", unsafe_allow_html=True)
+    with st.spinner(msg_spinner):
+        tip = get_tip_del_giorno(oggi, st.session_state.lang)
+    st.markdown(f"<div style='background-color:#1c1c1e; padding:15px; border-radius:12px; border-left:4px solid #16EC06;'><span style='color:#e5e5ea; font-style:italic;'>\"{tip}\"</span></div>", unsafe_allow_html=True)
 
 elif menu == L['stats']:
     pasti_stats = pasti.copy()
@@ -371,7 +377,8 @@ elif menu == L['stats']:
 elif menu == L['diet']:
     st.markdown(f"<h2>{L['diet']}</h2>", unsafe_allow_html=True)
     if utente.empty: st.warning("Completa il profilo."); st.stop()
-    st.info(f"📌 Obiettivo: **{utente.iloc[0].get('obiettivo', '')}** (Dieta: **{utente.iloc[0].get('dieta', '')}**). Target: **{target_v:.0f} Kcal**.")
+    prof = utente.iloc[0]
+    st.info(f"📌 Obiettivo: **{prof.get('obiettivo', '')}** (Dieta: **{prof.get('dieta', '')}**). Target: **{target_v:.0f} Kcal**.")
     
     c1, c2 = st.columns(2)
     num_pasti = c1.selectbox("Pasti Giornalieri", ["3 Pasti", "4 Pasti", "5 Pasti"])
@@ -379,7 +386,7 @@ elif menu == L['diet']:
 
     if st.button("✨ Genera Piano con IA", type="primary"):
         with st.spinner("IA..."):
-            instr = f"Crea piano {target_v} kcal. REGOLE: {recupera_da_manuali(f'Principi per dieta {utente.iloc[0]['dieta']}')}. Profilo: Dieta {utente.iloc[0]['dieta']}. Allergie: {','.join(allergie)}. FAI ESATTAMENTE {num_pasti}. RISPONDI IN {lang_str}."
+            instr = f"Crea piano {target_v} kcal. REGOLE: {recupera_da_manuali(f'Principi per dieta {prof['dieta']}')}. Profilo: Dieta {prof['dieta']}. Allergie: {','.join(allergie)}. FAI ESATTAMENTE {num_pasti}. RISPONDI IN {lang_str}."
             st.session_state.piano_testo = model.generate_content(instr).text
             res_s = model.generate_content(f"Estrai lista spesa a punti. RISPONDI IN {lang_str}: {st.session_state.piano_testo}")
             items = [re.sub(r'^\* |^- ', '', i).strip() for i in res_s.text.split('\n') if len(i)>2]
@@ -401,7 +408,6 @@ elif menu == L['shop']:
             if c != row['completato']: supabase.table("spesa").update({"completato": c}).eq("id", row['id']).execute(); st.rerun()
         st.markdown("</div><br>", unsafe_allow_html=True)
         
-        # FIX MEDIO: Conferma Svuota Lista
         if st.button("Svuota Lista", type="primary"): st.session_state.conferma_svuota = True
         if st.session_state.get('conferma_svuota', False):
             st.warning(f"⚠️ {L['empty_list_warn']}")
@@ -421,7 +427,8 @@ elif menu == L['hist']:
         for _, r in pasti.sort_values('data_ora', ascending=False).iterrows():
             st.markdown("<div style='background-color:#1c1c1e; padding:15px; border-radius:12px; margin-bottom:10px; border-left: 4px solid #16EC06;'>", unsafe_allow_html=True)
             c1, c2 = st.columns([5, 1])
-            c1.markdown(f"<strong style='color:white;'>{r['data_ora'].strftime('%d/%m/%Y %H:%M')}</strong> - <span style='color:#e5e5ea;'>{r['descrizione']}</span> | <strong style='color:#58a6ff;'>{r['calorie']:.0f} kcal</strong>", unsafe_allow_html=True)
+            sc = f" (Score: {r['rating']:.0f})" if 'rating' in r and pd.notna(r['rating']) else ""
+            c1.markdown(f"<strong style='color:white;'>{r['data_ora'].strftime('%d/%m/%Y %H:%M')}</strong> - <span style='color:#e5e5ea;'>{r['descrizione']}</span> | <strong style='color:#58a6ff;'>{r['calorie']:.0f} kcal</strong><span style='color:#16EC06;'>{sc}</span>", unsafe_allow_html=True)
             if c2.button("Elimina", key=f"del_{r['id']}"): supabase.table("pasti").delete().eq("id", r['id']).execute(); st.rerun()
             st.markdown("</div>", unsafe_allow_html=True)
 
@@ -438,40 +445,55 @@ elif menu == L['chat']:
         with st.chat_message("assistant"): st.markdown(res.text)
 
 elif menu == L['prof']:
-    st.markdown(f"<h2>{L['prof']}</h2>", unsafe_allow_html=True)
-    profilo = {} if utente.empty else utente.iloc[0]
-    tab_dati, tab_sicurezza, tab_privacy = st.tabs(["📝 Dati", "🔒 Password", "🛡️ Privacy"])
+    st.markdown(f"<h2>{L['prof']} ⚙️</h2>", unsafe_allow_html=True)
+    if utente.empty: 
+        st.error("Errore: Profilo non trovato. Contatta il supporto.")
+        st.stop()
     
-    with tab_dati:
-        with st.form("upd_prof"):
-            c1, c2 = st.columns(2); u_n = c1.text_input("Nome", value=profilo.get('nome', '')); u_c = c2.text_input("Cognome", value=profilo.get('cognome', ''))
-            c3, c4, c5 = st.columns(3); u_s = c3.selectbox("Sesso", ["Uomo", "Donna"], index=0 if profilo.get('sesso')=="Uomo" else 1); u_p = c4.number_input("Peso", value=float(profilo.get('peso', 70.0))); u_a = c5.number_input("Altezza", value=float(profilo.get('altezza', 170.0)))
-            c6, c7 = st.columns(2); u_d = c6.selectbox("Dieta", ["Onnivoro", "Carnivoro", "Vegetariano", "Vegano", "Pescatariano"], index=0); u_sp = c7.selectbox("Sport", ["Sedentario", "Leggera", "Moderata", "Intensa", "Atleta"], index=0)
-            u_ob = st.selectbox("Obiettivo", ["Dimagrimento", "Mantenimento", "Aumento Massa"], index=0)
+    prof = utente.iloc[0]
+    t1, t2, t3 = st.tabs(["📝 Dati", "🔒 Password", "🛡️ Privacy"])
+    
+    with t1:
+        with st.form("edit_profile"):
+            c1, c2 = st.columns(2); u_n = c1.text_input("Nome", value=prof.get('nome', '')); u_c = c2.text_input("Cognome", value=prof.get('cognome', ''))
+            c3, c4, c5 = st.columns(3); u_sex = c3.selectbox("Sesso", ["Uomo", "Donna"], index=0 if prof.get('sesso')=="Uomo" else 1); u_w = c4.number_input("Peso (kg)", value=float(prof.get('peso', 70.0))); u_h = c5.number_input("Altezza (cm)", value=float(prof.get('altezza', 170.0)))
             
-            if st.form_submit_button("Salva Modifiche", type="primary"):
-                # FIX ALTO: Calcolo Età Dinamico nel Profilo
-                if pd.notna(profilo.get('data_nascita')):
-                    try:
-                        dob = datetime.strptime(str(profilo['data_nascita']), '%Y-%m-%d').date()
-                        eta = oggi.year - dob.year - ((oggi.month, oggi.day) < (dob.month, dob.day))
-                    except: eta = 30
-                else: eta = 30
-                
-                bmr = (10 * u_p) + (6.25 * u_a) - (5 * eta) + (5 if u_s=="Uomo" else -161)
-                ntdee = bmr * {"Sedentario": 1.2, "Leggera": 1.375, "Moderata": 1.55, "Intensa": 1.725}.get(u_sp.split(" ")[0], 1.2)
-                if "Dimagrimento" in u_ob: ntdee -= 400
-                elif "Aumento" in u_ob: ntdee += 300
-                
-                supabase.table("utenti").update({"nome": u_n, "cognome": u_c, "sesso": u_s, "peso": u_p, "altezza": u_a, "dieta": u_d, "sport": u_sp, "obiettivo": u_ob, "tdee": ntdee}).eq("user_id", id_utente).execute()
-                st.success("✅ Aggiornato!")
-    with tab_sicurezza:
+            curr_dob = datetime.strptime(prof['data_nascita'], '%Y-%m-%d').date() if prof.get('data_nascita') else datetime(1990,1,1).date()
+            u_dob = st.date_input("Data di Nascita", value=curr_dob)
+            
+            c6, c7 = st.columns(2)
+            diete_list = ["Onnivoro", "Vegetariano", "Vegano", "Pescatariano", "Chetogenica"]
+            u_diet = c6.selectbox("Dieta", diete_list, index=diete_list.index(prof.get('dieta', "Onnivoro")))
+            
+            sport_list = ["Sedentario", "Leggera", "Moderata", "Intensa", "Atleta"]
+            u_sport = c7.selectbox("Attività Fisica", sport_list, index=sport_list.index(prof.get('sport', "Sedentario")))
+            
+            obj_list = ["Dimagrimento", "Mantenimento", "Aumento Massa", "Definizione"]
+            u_obj = st.selectbox("Obiettivo", obj_list, index=obj_list.index(prof.get('obiettivo', "Mantenimento")))
+            
+            if st.form_submit_button("💾 Salva Modifiche e Ricalcola TDEE", type="primary"):
+                nuovo_tdee = calcola_tdee_professionale(u_w, u_h, u_dob, u_sex, u_sport, u_obj)
+                try:
+                    supabase.table("utenti").update({
+                        "nome": u_n, "cognome": u_c, "sesso": u_sex, "peso": u_w, "altezza": u_h, 
+                        "data_nascita": str(u_dob), "dieta": u_diet, "sport": u_sport, "obiettivo": u_obj, "tdee": nuovo_tdee
+                    }).eq("user_id", str(id_utente)).execute()
+                    st.success(f"✅ Profilo aggiornato! Nuovo Target: {nuovo_tdee:.0f} kcal.")
+                    st.rerun()
+                except Exception as e: st.error(f"Errore nel salvataggio: {e}")
+
+    with t2:
         with st.form("pwd"):
-            if st.form_submit_button("Aggiorna Password", type="primary"): supabase.auth.update_user({'password': st.text_input("Nuova Pwd", type="password")}); st.success("Fatto.")
-    with tab_privacy:
+            new_p = st.text_input("Nuova Password", type="password")
+            if st.form_submit_button("Aggiorna Password", type="primary"):
+                if len(new_p) >= 6:
+                    supabase.auth.update_user({"password": new_p}); st.success("Password aggiornata.")
+                else: st.warning("Minimo 6 caratteri.")
+                
+    with t3:
         with st.form("priv"):
-            up_mkt = st.checkbox("Consenso Marketing", value=bool(profilo.get('consenso_marketing', False)))
-            up_prof = st.checkbox("Consenso Profilazione", value=bool(profilo.get('consenso_profilazione', False)))
-            if st.form_submit_button("Salva GDPR", type="primary"):
-                supabase.table("utenti").update({"consenso_marketing": up_mkt, "consenso_profilazione": up_prof}).eq("user_id", id_utente).execute()
-                st.success("✅ Aggiornato!")
+            u_mkt = st.checkbox("Marketing", value=bool(prof.get('consenso_marketing', False)))
+            u_prof = st.checkbox("Profilazione", value=bool(prof.get('consenso_profilazione', False)))
+            if st.form_submit_button("Salva Privacy", type="primary"):
+                supabase.table("utenti").update({"consenso_marketing": u_mkt, "consenso_profilazione": u_prof}).eq("user_id", str(id_utente)).execute()
+                st.success("Privacy aggiornata.")
